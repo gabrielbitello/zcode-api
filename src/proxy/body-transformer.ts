@@ -18,6 +18,14 @@
  *   4. Anthropic format + `ctx.metadataUserId` set → inject
  *      `metadata: { user_id }` (bundle `E2e`/`UIo` device/session blob —
  *      value assembled by the caller via buildAnthropicMetadataUserId).
+ *   5. Anthropic format → GLM reasoning-effort suffix on `model` (fork
+ *      convention, 19/10/2026): a trailing `-low`/`-min`/`-high`/`-max` is
+ *      stripped and injected as the z.ai `reasoning_effort` body field
+ *      (GLM-5.3+ always reasons; upstream default is "max"). Lets one
+ *      upstream model serve several client slots at different effort levels
+ *      (e.g. Claude Code haiku/sonnet/opus all on glm-5.3-flash). Skipped
+ *      when the body already carries `reasoning_effort` (client wins) or
+ *      when ZCODE_PROXY_EFFORT_SUFFIX=off.
  *
  * @see _reverse/NOTEPAD.md "How Credential is Used for LLM Calls"
  */
@@ -76,6 +84,7 @@ export function transformRequestBody(body: string | undefined, ctx: TransformCon
     if (ctx.metadataUserId) {
       modified = applyAnthropicUserId(obj, ctx.metadataUserId) || modified;
     }
+    modified = applyReasoningEffortSuffix(obj) || modified;
   }
 
   return modified ? JSON.stringify(parsed) : body;
@@ -176,6 +185,29 @@ function applyAnthropicUserId(body: Record<string, unknown>, userId: string): bo
     ...(isPlainObject(existing) ? existing : {}),
     user_id: userId,
   };
+  return true;
+}
+
+/**
+ * Anthropic: strip a trailing reasoning-effort suffix from `model` and inject
+ * it as the z.ai `reasoning_effort` body field (GLM-5.3+: thinking is always
+ * on; upstream default effort is "max", so light slots must ask for less).
+ * `-min` is accepted as an alias for `-low` (upstream spelling is `low`).
+ * Client-supplied `reasoning_effort` always wins; ZCODE_PROXY_EFFORT_SUFFIX=off
+ * disables the transformation entirely (rollback switch).
+ */
+function applyReasoningEffortSuffix(body: Record<string, unknown>): boolean {
+  if (process.env.ZCODE_PROXY_EFFORT_SUFFIX === "off") return false;
+  if (body.reasoning_effort !== undefined) return false;
+  const model = typeof body.model === "string" ? body.model : undefined;
+  if (!model) return false;
+  const m = /-(low|min|high|max)$/i.exec(model);
+  if (!m || !m[1]) return false;
+  const suffix = m[1].toLowerCase();
+  const effort = suffix === "min" ? "low" : suffix;
+  body.model = model.slice(0, model.length - m[0].length);
+  body.reasoning_effort = effort;
+  console.log(`[effort] ${model} -> ${body.model}:${effort}`);
   return true;
 }
 

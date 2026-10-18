@@ -451,3 +451,66 @@ describe("transformRequestBody — metadata.user_id (Anthropic)", () => {
     expect(parsed.metadata).toBeUndefined();
   });
 });
+
+describe("transformRequestBody — reasoning-effort suffix (Anthropic, fork)", () => {
+  it("strips -high suffix and injects reasoning_effort", () => {
+    const body = JSON.stringify({ model: "glm-5.3-flash-high", messages: [] });
+    const out = transformRequestBody(body, { format: "anthropic" });
+    const parsed = JSON.parse(out as string);
+    expect(parsed.model).toBe("glm-5.3-flash");
+    expect(parsed.reasoning_effort).toBe("high");
+  });
+
+  it("maps -min alias to low and -max to max", () => {
+    const min = JSON.parse(
+      transformRequestBody(JSON.stringify({ model: "glm-5.3-flash-min", messages: [] }), { format: "anthropic" }) as string,
+    );
+    expect(min.model).toBe("glm-5.3-flash");
+    expect(min.reasoning_effort).toBe("low");
+
+    const max = JSON.parse(
+      transformRequestBody(JSON.stringify({ model: "glm-5.3-flash-max", messages: [] }), { format: "anthropic" }) as string,
+    );
+    expect(max.model).toBe("glm-5.3-flash");
+    expect(max.reasoning_effort).toBe("max");
+  });
+
+  it("keeps client reasoning_effort and does NOT strip the suffix then", () => {
+    const body = JSON.stringify({ model: "glm-5.3-flash-low", reasoning_effort: "max", messages: [] });
+    const out = transformRequestBody(body, { format: "anthropic" });
+    const parsed = JSON.parse(out as string);
+    expect(parsed.model).toBe("glm-5.3-flash-low");
+    expect(parsed.reasoning_effort).toBe("max");
+  });
+
+  it("leaves models without a recognized suffix untouched", () => {
+    const body = JSON.stringify({ model: "glm-5-turbo", messages: [] });
+    const out = transformRequestBody(body, { format: "anthropic" });
+    const parsed = JSON.parse(out as string);
+    expect(parsed.model).toBe("glm-5-turbo");
+    expect(parsed.reasoning_effort).toBeUndefined();
+  });
+
+  it("does NOT apply the suffix transformation on OpenAI format", () => {
+    const body = JSON.stringify({ model: "glm-5.3-flash-low", messages: [] });
+    const out = transformRequestBody(body, { format: "openai" });
+    const parsed = JSON.parse(out as string);
+    expect(parsed.model).toBe("glm-5.3-flash-low");
+    expect(parsed.reasoning_effort).toBeUndefined();
+  });
+
+  it("ZCODE_PROXY_EFFORT_SUFFIX=off disables the transformation", () => {
+    const previous = process.env.ZCODE_PROXY_EFFORT_SUFFIX;
+    process.env.ZCODE_PROXY_EFFORT_SUFFIX = "off";
+    try {
+      const body = JSON.stringify({ model: "glm-5.3-flash-max", messages: [] });
+      const out = transformRequestBody(body, { format: "anthropic" });
+      const parsed = JSON.parse(out as string);
+      expect(parsed.model).toBe("glm-5.3-flash-max");
+      expect(parsed.reasoning_effort).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.ZCODE_PROXY_EFFORT_SUFFIX;
+      else process.env.ZCODE_PROXY_EFFORT_SUFFIX = previous;
+    }
+  });
+});
