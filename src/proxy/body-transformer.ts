@@ -84,6 +84,7 @@ export function transformRequestBody(body: string | undefined, ctx: TransformCon
     if (ctx.metadataUserId) {
       modified = applyAnthropicUserId(obj, ctx.metadataUserId) || modified;
     }
+    modified = applyClaudeModelAlias(obj) || modified;
     modified = applyReasoningEffortSuffix(obj) || modified;
   }
 
@@ -185,6 +186,37 @@ function applyAnthropicUserId(body: Record<string, unknown>, userId: string): bo
     ...(isPlainObject(existing) ? existing : {}),
     user_id: userId,
   };
+  return true;
+}
+
+/**
+ * Claude Desktop tier aliases (19/10): the Desktop validates custom gateway
+ * model IDs and only accepts Anthropic-shaped names (`claude-*`,
+ * `anthropic/claude-*`), so the real GLM slots are aliased. The tier decides
+ * the upstream base + DEFAULT reasoning effort; a client-supplied
+ * `reasoning_effort` always wins (Desktop effort field → real control).
+ * `fable` maps to the full non-flash GLM (its upstream default effort is max).
+ * ZCODE_PROXY_CLAUDE_ALIAS=off disables the transformation (rollback switch).
+ */
+const CLAUDE_TIERS: Record<string, { model: string; effort?: string }> = {
+  haiku: { model: "glm-5.3-flash", effort: "low" },
+  sonnet: { model: "glm-5.3-flash", effort: "high" },
+  opus: { model: "glm-5.3-flash", effort: "max" },
+  fable: { model: "glm-5.3" },
+};
+
+function applyClaudeModelAlias(body: Record<string, unknown>): boolean {
+  if (process.env.ZCODE_PROXY_CLAUDE_ALIAS === "off") return false;
+  const model = typeof body.model === "string" ? body.model : undefined;
+  if (!model) return false;
+  const m = /^(?:anthropic\/)?claude[-_](haiku|sonnet|opus|fable)(?:[-_.].*)?$/i.exec(model);
+  if (!m || !m[1]) return false;
+  const tier = CLAUDE_TIERS[m[1].toLowerCase()];
+  body.model = tier.model;
+  if (tier.effort && body.reasoning_effort === undefined) {
+    body.reasoning_effort = tier.effort;
+  }
+  console.log(`[alias] ${model} -> ${tier.model}${tier.effort ? ":" + tier.effort : ""}`);
   return true;
 }
 

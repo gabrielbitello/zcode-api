@@ -514,3 +514,69 @@ describe("transformRequestBody — reasoning-effort suffix (Anthropic, fork)", (
     }
   });
 });
+
+describe("transformRequestBody — Claude Desktop tier aliases (Anthropic, fork)", () => {
+  it.each([
+    ["claude-haiku-4-5", "glm-5.3-flash", "low"],
+    ["anthropic/claude-haiku-4-5", "glm-5.3-flash", "low"],
+    ["claude-sonnet-4-5", "glm-5.3-flash", "high"],
+    ["claude-opus-4-1", "glm-5.3-flash", "max"],
+  ])("maps %s to the tier base + default effort", (incoming, model, effort) => {
+    const out = transformRequestBody(JSON.stringify({ model: incoming, messages: [] }), {
+      format: "anthropic",
+    }) as string;
+    const parsed = JSON.parse(out);
+    expect(parsed.model).toBe(model);
+    expect(parsed.reasoning_effort).toBe(effort);
+  });
+
+  it("maps fable to the full non-flash GLM without effort field", () => {
+    const out = transformRequestBody(JSON.stringify({ model: "claude-fable-1", messages: [] }), {
+      format: "anthropic",
+    }) as string;
+    const parsed = JSON.parse(out);
+    expect(parsed.model).toBe("glm-5.3");
+    expect(parsed.reasoning_effort).toBeUndefined();
+  });
+
+  it("client reasoning_effort wins over the tier default", () => {
+    const body = JSON.stringify({ model: "claude-sonnet-4-5", reasoning_effort: "low", messages: [] });
+    const out = transformRequestBody(body, { format: "anthropic" }) as string;
+    const parsed = JSON.parse(out);
+    expect(parsed.model).toBe("glm-5.3-flash");
+    expect(parsed.reasoning_effort).toBe("low");
+  });
+
+  it("does NOT alias non-claude models", () => {
+    const out = transformRequestBody(JSON.stringify({ model: "glm-5.3-flash-low", messages: [] }), {
+      format: "anthropic",
+    }) as string;
+    const parsed = JSON.parse(out);
+    expect(parsed.model).toBe("glm-5.3-flash");
+    expect(parsed.reasoning_effort).toBe("low");
+  });
+
+  it("does NOT alias on OpenAI format", () => {
+    const out = transformRequestBody(JSON.stringify({ model: "claude-sonnet-4-5", messages: [] }), {
+      format: "openai",
+    }) as string;
+    const parsed = JSON.parse(out);
+    expect(parsed.model).toBe("claude-sonnet-4-5");
+  });
+
+  it("ZCODE_PROXY_CLAUDE_ALIAS=off disables the transformation", () => {
+    const previous = process.env.ZCODE_PROXY_CLAUDE_ALIAS;
+    process.env.ZCODE_PROXY_CLAUDE_ALIAS = "off";
+    try {
+      const out = transformRequestBody(JSON.stringify({ model: "claude-sonnet-4-5", messages: [] }), {
+        format: "anthropic",
+      }) as string;
+      const parsed = JSON.parse(out);
+      expect(parsed.model).toBe("claude-sonnet-4-5");
+      expect(parsed.reasoning_effort).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.ZCODE_PROXY_CLAUDE_ALIAS;
+      else process.env.ZCODE_PROXY_CLAUDE_ALIAS = previous;
+    }
+  });
+});
