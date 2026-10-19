@@ -192,17 +192,17 @@ function applyAnthropicUserId(body: Record<string, unknown>, userId: string): bo
 /**
  * Claude Desktop tier aliases (19/10): the Desktop validates custom gateway
  * model IDs and only accepts Anthropic-shaped names (`claude-*`,
- * `anthropic/claude-*`), so the real GLM slots are aliased. The tier decides
- * the upstream base + DEFAULT reasoning effort; a client-supplied
- * `reasoning_effort` always wins (Desktop effort field → real control).
- * `fable` maps to the full non-flash GLM (its upstream default effort is max).
- * ZCODE_PROXY_CLAUDE_ALIAS=off disables the transformation (rollback switch).
+ * `anthropic/claude-*`), so the real GLM slots are aliased. The NAME is the
+ * contract: the tier FORCES its reasoning effort (haiku=low, sonnet=high,
+ * opus=max, fable=max on the full non-flash GLM) — a client-supplied
+ * `reasoning_effort` is OVERWRITTEN, never honored (Gabriel, 19/10: "tem que
+ * obrigar sempre"). ZCODE_PROXY_CLAUDE_ALIAS=off disables (rollback switch).
  */
-const CLAUDE_TIERS: Record<string, { model: string; effort?: string }> = {
+const CLAUDE_TIERS: Record<string, { model: string; effort: string }> = {
   haiku: { model: "glm-5.3-flash", effort: "low" },
   sonnet: { model: "glm-5.3-flash", effort: "high" },
   opus: { model: "glm-5.3-flash", effort: "max" },
-  fable: { model: "glm-5.3" },
+  fable: { model: "glm-5.3", effort: "max" },
 };
 
 function applyClaudeModelAlias(body: Record<string, unknown>): boolean {
@@ -213,10 +213,8 @@ function applyClaudeModelAlias(body: Record<string, unknown>): boolean {
   if (!m || !m[1]) return false;
   const tier = CLAUDE_TIERS[m[1].toLowerCase()];
   body.model = tier.model;
-  if (tier.effort && body.reasoning_effort === undefined) {
-    body.reasoning_effort = tier.effort;
-  }
-  console.log(`[alias] ${model} -> ${tier.model}${tier.effort ? ":" + tier.effort : ""}`);
+  body.reasoning_effort = tier.effort;
+  console.log(`[alias] ${model} -> ${tier.model}:${tier.effort}`);
   return true;
 }
 
@@ -225,12 +223,13 @@ function applyClaudeModelAlias(body: Record<string, unknown>): boolean {
  * it as the z.ai `reasoning_effort` body field (GLM-5.3+: thinking is always
  * on; upstream default effort is "max", so light slots must ask for less).
  * `-min` is accepted as an alias for `-low` (upstream spelling is `low`).
- * Client-supplied `reasoning_effort` always wins; ZCODE_PROXY_EFFORT_SUFFIX=off
+ * The NAME is the contract: a client-supplied `reasoning_effort` is
+ * OVERWRITTEN by the suffix effort (same rule as the Claude tier aliases —
+ * the slot decides, the client does not). ZCODE_PROXY_EFFORT_SUFFIX=off
  * disables the transformation entirely (rollback switch).
  */
 function applyReasoningEffortSuffix(body: Record<string, unknown>): boolean {
   if (process.env.ZCODE_PROXY_EFFORT_SUFFIX === "off") return false;
-  if (body.reasoning_effort !== undefined) return false;
   const model = typeof body.model === "string" ? body.model : undefined;
   if (!model) return false;
   const m = /-(low|min|high|max)$/i.exec(model);

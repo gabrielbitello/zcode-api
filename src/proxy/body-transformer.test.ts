@@ -475,12 +475,12 @@ describe("transformRequestBody — reasoning-effort suffix (Anthropic, fork)", (
     expect(max.reasoning_effort).toBe("max");
   });
 
-  it("keeps client reasoning_effort and does NOT strip the suffix then", () => {
+  it("suffix FORCES the effort — client reasoning_effort is overwritten", () => {
     const body = JSON.stringify({ model: "glm-5.3-flash-low", reasoning_effort: "max", messages: [] });
     const out = transformRequestBody(body, { format: "anthropic" });
     const parsed = JSON.parse(out as string);
-    expect(parsed.model).toBe("glm-5.3-flash-low");
-    expect(parsed.reasoning_effort).toBe("max");
+    expect(parsed.model).toBe("glm-5.3-flash");
+    expect(parsed.reasoning_effort).toBe("low");
   });
 
   it("leaves models without a recognized suffix untouched", () => {
@@ -530,21 +530,21 @@ describe("transformRequestBody — Claude Desktop tier aliases (Anthropic, fork)
     expect(parsed.reasoning_effort).toBe(effort);
   });
 
-  it("maps fable to the full non-flash GLM without effort field", () => {
+  it("maps fable to the full non-flash GLM FORCED to max effort", () => {
     const out = transformRequestBody(JSON.stringify({ model: "claude-fable-1", messages: [] }), {
       format: "anthropic",
     }) as string;
     const parsed = JSON.parse(out);
     expect(parsed.model).toBe("glm-5.3");
-    expect(parsed.reasoning_effort).toBeUndefined();
+    expect(parsed.reasoning_effort).toBe("max");
   });
 
-  it("client reasoning_effort wins over the tier default", () => {
+  it("tier FORCES the effort — client reasoning_effort is overwritten", () => {
     const body = JSON.stringify({ model: "claude-sonnet-4-5", reasoning_effort: "low", messages: [] });
     const out = transformRequestBody(body, { format: "anthropic" }) as string;
     const parsed = JSON.parse(out);
     expect(parsed.model).toBe("glm-5.3-flash");
-    expect(parsed.reasoning_effort).toBe("low");
+    expect(parsed.reasoning_effort).toBe("high");
   });
 
   it("does NOT alias non-claude models", () => {
